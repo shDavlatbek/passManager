@@ -1,0 +1,13 @@
+services:
+  vaulthaus:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_CLIENT_ID:-}
+    image: vaulthaus:latest
+    container_name: vaulthaus
+    ports:
+      # Host:Container — override with HOST_PORT env var (default 3001).
+      - "${HOST_PORT:-3001}:3000"
+    restart: unless-stopped

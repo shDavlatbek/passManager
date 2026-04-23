@@ -133,6 +133,45 @@ Deploys unchanged to Vercel, Netlify, Cloudflare Pages, or any static host:
 npx vercel --prod
 ```
 
+### Docker (self-hosted)
+
+Ships with a multi-stage `Dockerfile` and `docker-compose.yml`. No nginx — the container exposes Next.js's standalone server on port 3000, and compose maps it to a host port of your choice.
+
+```bash
+# 1. (Optional) set the Google Client ID so cloud sync works in the image.
+#    NEXT_PUBLIC_* vars are baked in at build time, so they belong here.
+export NEXT_PUBLIC_GOOGLE_CLIENT_ID="1049…apps.googleusercontent.com"
+
+# 2. Build and run
+docker compose up -d --build
+
+# → open http://localhost:3001
+```
+
+Change the host port without editing files:
+
+```bash
+HOST_PORT=8080 docker compose up -d --build
+```
+
+Or with plain docker (no compose):
+
+```bash
+docker build \
+  --build-arg NEXT_PUBLIC_GOOGLE_CLIENT_ID="$NEXT_PUBLIC_GOOGLE_CLIENT_ID" \
+  -t vaulthaus .
+
+docker run -d --name vaulthaus -p 3001:3000 vaulthaus
+```
+
+Stop + remove:
+
+```bash
+docker compose down
+```
+
+The image is ~150 MB (Node 22 Alpine + Next.js standalone bundle), runs as a non-root user, and has no writable mounts — all vault data lives in the *user's* browser IndexedDB, not inside the container. That means the container is disposable: you can rebuild, redeploy, or scale it without touching anyone's data.
+
 ## Testing
 
 ```bash

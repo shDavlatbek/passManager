@@ -1,0 +1,32 @@
+node_modules
+.next
+.turbo
+.git
+.gitignore
+.github
+.vscode
+.idea
+.vercel
+coverage
+
+# Never ship your secrets into the image
+.env
+.env.*
+!.env.local.example
+
+# Local dev artifacts
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Not needed at build/runtime
+task.html
+__tests__
+vitest.config.ts
+vitest.setup.ts
+
+# Dockerfiles / compose are copied by context but unused at runtime
+Dockerfile
+docker-compose.yml
+.dockerignore
