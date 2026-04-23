@@ -59,6 +59,42 @@ export default function SettingsPage() {
     URL.revokeObjectURL(url);
   }
 
+  async function exportCsv() {
+    const ok = await confirm({
+      title: "Export passwords as CSV?",
+      description: "The CSV will contain every password unencrypted — compatible with imports in most password managers. Store it only on a device you fully trust and delete it once you're done.",
+      confirmLabel: "Export CSV",
+      tone: "warning",
+    });
+    if (!ok) return;
+    const header = ["service", "url", "username", "password", "notes", "totpSecret", "tags"] as const;
+    const esc = (v: unknown) => {
+      if (v === undefined || v === null) return "";
+      const s = String(v);
+      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = [header.join(",")];
+    for (const e of entries) {
+      lines.push([
+        esc(e.service),
+        esc(e.url),
+        esc(e.username),
+        esc(e.password),
+        esc(e.notes),
+        esc(e.totpSecret),
+        esc((e.tags ?? []).join("; ")),
+      ].join(","));
+    }
+    const csv = "﻿" + lines.join("\r\n") + "\r\n";
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `vaulthaus-plaintext-${new Date().toISOString().split("T")[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function changePassword() {
     setMessage(null);
     if (!current || !next) return;
@@ -141,15 +177,21 @@ export default function SettingsPage() {
       </Section>
 
       <Section title="Export & backup">
-        <div className="space-y-3">
+        <div className="flex flex-col items-start gap-3">
           <button onClick={exportEncrypted} className="btn btn-secondary">
             <Download className="w-4 h-4" /> Download encrypted backup (.vault.json)
           </button>
-          <button onClick={exportPlain} className="btn btn-ghost">
-            <Download className="w-4 h-4" /> Export plaintext JSON (use with caution)
-          </button>
+          <div className="flex flex-wrap gap-3">
+            <button onClick={exportPlain} className="btn btn-ghost">
+              <Download className="w-4 h-4" /> Export plaintext JSON
+            </button>
+            <button onClick={exportCsv} className="btn btn-ghost">
+              <Download className="w-4 h-4" /> Export CSV
+            </button>
+          </div>
           <p className="text-[11px] text-[var(--color-muted)]">
             Encrypted backups can only be restored by re-importing the file into a vault that knows your master password.
+            Plaintext exports contain every password unencrypted — use with caution.
           </p>
         </div>
       </Section>
