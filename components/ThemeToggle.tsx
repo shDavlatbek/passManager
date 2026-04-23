@@ -50,13 +50,13 @@ export function ThemeToggle() {
       onClick={toggle}
       aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
       title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
-      className="relative w-12 h-6 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] overflow-hidden transition-colors hover:border-[var(--color-border-strong)]"
+      className="relative inline-flex w-[52px] h-7 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] transition-colors hover:border-[var(--color-border-strong)]"
     >
       <motion.span
-        className="absolute top-0.5 w-5 h-5 rounded-full flex items-center justify-center text-[var(--color-text)] shadow-sm"
+        className="absolute top-1/2 left-[3px] -translate-y-1/2 w-[22px] h-[22px] rounded-full flex items-center justify-center text-[var(--color-text)] shadow-sm pointer-events-none"
         initial={false}
         animate={{
-          x: theme === "dark" ? 2 : 24,
+          x: theme === "dark" ? 0 : 22,
           backgroundColor: theme === "dark" ? "#0b0d0e" : "#fff7d6",
           rotate: theme === "dark" ? 0 : 360,
         }}

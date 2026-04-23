@@ -5,7 +5,7 @@ import { useEffect } from "react";
 import { useVaultStore } from "@/lib/vault-store";
 import { TransitionShell } from "@/lib/transition";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { Vault, Sparkle, Shield, Settings, Share, Upload, Plus, Lock, Key } from "@/components/icons";
+import { Vault, Sparkle, Shield, Settings, Share, Upload, Plus, Lock, Key, Cloud } from "@/components/icons";
 
 const nav = [
   { href: "/vault", label: "Vault", icon: Vault },
@@ -13,6 +13,7 @@ const nav = [
   { href: "/health", label: "Health", icon: Shield },
   { href: "/share", label: "Share", icon: Share },
   { href: "/import", label: "Import", icon: Upload },
+  { href: "/sync", label: "Sync", icon: Cloud },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

@@ -44,6 +44,8 @@ interface VaultState {
   updateSettings: (patch: Partial<VaultSettings>) => Promise<void>;
   wipeVault: () => Promise<void>;
   changeMasterPassword: (current: string, next: string) => Promise<boolean>;
+  serializeBackup: () => Promise<{ meta: VaultMetadata; entries: EncryptedEntry[] } | null>;
+  restoreFromBackup: (payload: unknown) => Promise<void>;
 }
 
 function newId(): string {
@@ -184,6 +186,33 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   wipeVault: async () => {
     await clearVault();
     set({ status: "empty", meta: null, key: null, entries: [] });
+  },
+
+  serializeBackup: async () => {
+    const meta = await getVaultMeta();
+    if (!meta) return null;
+    const entries = await listEntries();
+    return { meta, entries };
+  },
+
+  restoreFromBackup: async (payload: unknown) => {
+    if (!payload || typeof payload !== "object") {
+      throw new Error("Invalid backup payload.");
+    }
+    const p = payload as { meta?: unknown; entries?: unknown };
+    const m = p.meta as VaultMetadata | undefined;
+    const es = p.entries as EncryptedEntry[] | undefined;
+    if (!m || !Array.isArray(es)) throw new Error("Backup is missing meta or entries.");
+    if (m.version !== 1) throw new Error("Unsupported backup version.");
+    if (!m.kdf || m.kdf.name !== "PBKDF2") throw new Error("Backup KDF not recognized.");
+    if (!m.verification?.iv || !m.verification?.ciphertext) throw new Error("Backup verification blob missing.");
+    await clearVault();
+    await setVaultMeta(m);
+    for (const e of es) {
+      if (!e?.meta?.id || !e.iv || !e.ciphertext) throw new Error("Corrupted entry in backup.");
+      await putEntry(e);
+    }
+    set({ status: "locked", meta: m, key: null, entries: [] });
   },
 
   changeMasterPassword: async (current, next) => {

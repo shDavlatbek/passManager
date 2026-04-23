@@ -60,6 +60,9 @@ export function TransitionShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Intercept same-origin anchor clicks so every Link gets the transition.
+  // Must run in the CAPTURE phase + stopPropagation so we preempt
+  // Next.js Link's React onClick (which would otherwise call router.push first
+  // and skip our optimistic exit animation).
   useEffect(() => {
     function handle(e: MouseEvent) {
       if (e.defaultPrevented) return;
@@ -72,11 +75,23 @@ export function TransitionShell({ children }: { children: React.ReactNode }) {
       if (a.hasAttribute("download")) return;
       if (/^(https?:|mailto:|tel:|blob:|data:|javascript:)/i.test(href)) return;
       if (href.startsWith("#")) return;
+      // Resolve to a same-origin path; bail if the URL parses to a different origin.
+      let url: URL;
+      try {
+        url = new URL(href, window.location.href);
+      } catch {
+        return;
+      }
+      if (url.origin !== window.location.origin) return;
+      const path = url.pathname + url.search + url.hash;
+      const here = window.location.pathname + window.location.search + window.location.hash;
+      if (path === here) return;
       e.preventDefault();
-      navigate(href);
+      e.stopPropagation();
+      navigate(path);
     }
-    document.addEventListener("click", handle);
-    return () => document.removeEventListener("click", handle);
+    document.addEventListener("click", handle, true);
+    return () => document.removeEventListener("click", handle, true);
   }, [navigate]);
 
   const showContent = phase === "idle";

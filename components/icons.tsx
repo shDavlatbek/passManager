@@ -34,3 +34,7 @@ export const Tag = (p: P) => <svg {...base} {...p}><path d="M20.6 12.6 12 21.2a2
 export const Refresh = (p: P) => <svg {...base} {...p}><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 4v4h-4"/><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 20v-4h4"/></svg>;
 export const AlertTriangle = (p: P) => <svg {...base} {...p}><path d="M10.3 3.8 2 18a2 2 0 0 0 1.7 3h16.6A2 2 0 0 0 22 18L13.7 3.8a2 2 0 0 0-3.4 0Z"/><path d="M12 9v5M12 18h.01"/></svg>;
 export const ChartPie = (p: P) => <svg {...base} {...p}><path d="M21 12a9 9 0 1 1-9-9v9h9Z"/><path d="M15 3a6 6 0 0 1 6 6h-6V3Z"/></svg>;
+export const Cloud = (p: P) => <svg {...base} {...p}><path d="M17.5 19a4.5 4.5 0 1 0-1.4-8.78A6 6 0 0 0 4.6 13.4 3.4 3.4 0 0 0 6 19h11.5Z"/></svg>;
+export const CloudUp = (p: P) => <svg {...base} {...p}><path d="M17.5 17a4.5 4.5 0 1 0-1.4-8.78A6 6 0 0 0 4.6 11.4 3.4 3.4 0 0 0 6 17h2"/><path d="M12 21v-8M9 16l3-3 3 3"/></svg>;
+export const CloudDown = (p: P) => <svg {...base} {...p}><path d="M17.5 17a4.5 4.5 0 1 0-1.4-8.78A6 6 0 0 0 4.6 11.4 3.4 3.4 0 0 0 6 17h2"/><path d="M12 13v8M9 18l3 3 3-3"/></svg>;
+export const LinkBreak = (p: P) => <svg {...base} {...p}><path d="M9 17H7a5 5 0 0 1 0-10h2M15 7h2a5 5 0 0 1 4.5 7M3 3l18 18"/></svg>;

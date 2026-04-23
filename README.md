@@ -35,12 +35,13 @@ Run locally — see [Setup](#setup) below. There is no hosted version bundled wi
 | First-time empty state | Illustrated empty state with three CTAs |
 | **Bonus**: one extra feature | `/health` dashboard (see below) |
 
-### Bonuses — all four implemented
+### Bonuses — five implemented
 
 1. **[HIBP breach check](lib/breach.ts)** — k-anonymity (first 5 SHA-1 hex chars sent, actual password never leaves the device). Cached for 24h. Per-entry badges on `/health`.
 2. **[Built-in TOTP 2FA codes](lib/totp.ts)** — RFC 6238, SHA-1 HMAC, tested against the RFC Appendix B vectors. Add a secret manually or paste an `otpauth://` URL. Codes rotate every 30s with a progress ring.
 3. **[Team sharing via encrypted share-links](lib/share-link.ts)** — pick an entry, set a one-time share password, get a URL-safe token. Recipient opens `/share`, enters the password (delivered out-of-band), and imports into their vault. Client-only, no backend.
 4. **[CSV import](lib/csv-import.ts)** — auto-detects Bitwarden, 1Password, LastPass export formats. Preview and select before importing.
+5. **[Google Drive cloud sync](lib/gdrive.ts)** — one-click encrypted backup/restore via your own Google account. Uses the `drive.appdata` scope so the file lives in a per-app hidden folder; Vaulthaus can never see anything else in your Drive. Only ciphertext + KDF metadata are uploaded — Google has no way to decrypt without your master password. See [Google Drive setup](#google-drive-setup) below.
 
 ## Architecture
 
@@ -102,7 +103,27 @@ npm test
 npm run build && npm start
 ```
 
-No environment variables. No external services required. No API keys. The only network call the app ever makes is to `api.pwnedpasswords.com` for optional breach scanning, using k-anonymity.
+Optional environment variable: `NEXT_PUBLIC_GOOGLE_CLIENT_ID` enables the Cloud Sync page. Without it, every other feature works fine offline. The only network calls the app ever makes are: `api.pwnedpasswords.com` (optional breach scanning, k-anonymity), `accounts.google.com` + `googleapis.com` (only if you opt into Drive sync), and `icons.duckduckgo.com` for service favicons.
+
+## Google Drive setup
+
+Cloud sync is opt-in. To enable it locally:
+
+```bash
+cp .env.local.example .env.local
+# Then fill in NEXT_PUBLIC_GOOGLE_CLIENT_ID
+```
+
+Steps to get the client ID:
+
+1. Open [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials).
+2. Create or pick a project. Enable **Google Drive API** under *Library*.
+3. *OAuth consent screen* → External → fill required fields → add yourself as a Test user.
+4. *Credentials* → Create credentials → **OAuth client ID** → type *Web application*.
+5. Add your origins under *Authorized JavaScript origins*: `http://localhost:3001`, plus your deploy URL.
+6. Copy the Client ID into `.env.local`, then `npm run dev`.
+
+The app requests only `https://www.googleapis.com/auth/drive.appdata` — Vaulthaus can read/write files in its own hidden app folder, nothing else in your Drive. Revoke access anytime at [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
 
 ## Deployment
 

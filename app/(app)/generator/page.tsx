@@ -107,10 +107,11 @@ function Toggle({ label, value, onChange }: { label: string; value: boolean; onC
         role="switch"
         aria-checked={value}
         onClick={() => onChange(!value)}
-        className={`relative w-10 h-5 rounded-full transition-colors ${value ? "bg-[var(--color-accent)]" : "bg-[var(--color-surface-2)] border border-[var(--color-border)]"}`}
+        className={`relative inline-flex shrink-0 w-11 h-6 rounded-full border transition-colors ${value ? "bg-[var(--color-accent)] border-transparent" : "bg-[var(--color-surface-2)] border-[var(--color-border)]"}`}
       >
         <span
-          className={`absolute top-0.5 w-4 h-4 rounded-full bg-[#0b0d0e] transition-transform ${value ? "translate-x-[22px]" : "translate-x-0.5"}`}
+          className="absolute top-[2px] w-[18px] h-[18px] rounded-full bg-[#0b0d0e] shadow-sm transition-[left] duration-200 ease-out pointer-events-none"
+          style={{ left: value ? "22px" : "2px" }}
         />
       </button>
     </label>
