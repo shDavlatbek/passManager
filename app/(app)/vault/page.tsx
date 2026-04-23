@@ -6,18 +6,23 @@ import { PageHeader } from "@/components/VaultShell";
 import { CredentialCard } from "@/components/CredentialCard";
 import { EmptyState, VaultEmptyIllustration } from "@/components/EmptyState";
 import { analyzeVault } from "@/lib/vault-analysis";
-import { Vault, Plus, Search, Sparkle, Upload, Tag } from "@/components/icons";
+import { Vault, Plus, Search, Sparkle, Upload, Tag, AlertTriangle, ArrowRight, Shield } from "@/components/icons";
 
 export default function VaultPage() {
   const entries = useVaultStore((s) => s.entries);
   const [query, setQuery] = useState("");
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [reusedIds, setReusedIds] = useState<Set<string>>(new Set());
+  const [weakIds, setWeakIds] = useState<Set<string>>(new Set());
+  const [oldIds, setOldIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
     analyzeVault(entries).then((a) => {
-      if (!cancelled) setReusedIds(a.reusedIds);
+      if (cancelled) return;
+      setReusedIds(a.reusedIds);
+      setWeakIds(a.weakIds);
+      setOldIds(a.oldIds);
     });
     return () => { cancelled = true; };
   }, [entries]);
@@ -87,6 +92,8 @@ export default function VaultPage() {
         </div>
       </div>
 
+      <HealthBanner weak={weakIds.size} reused={reusedIds.size} old={oldIds.size} />
+
       {tags.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-6 items-center">
           <button
@@ -119,5 +126,41 @@ export default function VaultPage() {
         )}
       </div>
     </>
+  );
+}
+
+function HealthBanner({ weak, reused, old }: { weak: number; reused: number; old: number }) {
+  const total = weak + reused + old;
+  if (total === 0) return null;
+
+  const parts: string[] = [];
+  if (weak > 0) parts.push(`${weak} weak`);
+  if (reused > 0) parts.push(`${reused} reused`);
+  if (old > 0) parts.push(`${old} older than 90 days`);
+
+  const tone = weak > 0 ? "danger" : "warning";
+  const accent =
+    tone === "danger"
+      ? { border: "border-[rgba(240,84,79,0.35)]", icon: "text-[var(--color-danger)]" }
+      : { border: "border-[rgba(242,181,68,0.35)]", icon: "text-[var(--color-warning)]" };
+
+  return (
+    <Link
+      href="/health"
+      className={`card ${accent.border} p-4 mb-5 flex items-center gap-4 hover:bg-[var(--color-surface-hover)] transition-colors group`}
+    >
+      <div className={`w-10 h-10 rounded-[var(--radius-md)] bg-[var(--color-surface-2)] border border-[var(--color-border)] flex items-center justify-center shrink-0 ${accent.icon}`}>
+        {tone === "danger" ? <AlertTriangle className="w-5 h-5" /> : <Shield className="w-5 h-5" />}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="font-display font-bold text-sm">
+          {weak > 0 ? "Weak passwords detected" : "Some credentials need attention"}
+        </div>
+        <div className="text-xs text-[var(--color-muted-strong)] mt-0.5 truncate">
+          {parts.join(" · ")} — review in Health to fix them.
+        </div>
+      </div>
+      <ArrowRight className="w-4 h-4 text-[var(--color-muted)] shrink-0 transition-transform group-hover:translate-x-0.5" />
+    </Link>
   );
 }
