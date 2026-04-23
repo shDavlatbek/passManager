@@ -13,7 +13,7 @@ WORKDIR /app
 
 # NEXT_PUBLIC_* vars are baked into the client bundle at build time.
 # Pass via --build-arg NEXT_PUBLIC_GOOGLE_CLIENT_ID=...  (or docker-compose build args).
-ARG NEXT_PUBLIC_GOOGLE_CLIENT_ID=""
+ARG NEXT_PUBLIC_GOOGLE_CLIENT_ID="1049964491207-u2pt4ve42o731g9mrusedq297qq35gra.apps.googleusercontent.com"
 ENV NEXT_PUBLIC_GOOGLE_CLIENT_ID=${NEXT_PUBLIC_GOOGLE_CLIENT_ID}
 ENV NEXT_TELEMETRY_DISABLED=1
 

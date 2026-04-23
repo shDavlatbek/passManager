@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_CLIENT_ID:-}
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_CLIENT_ID:-1049964491207-u2pt4ve42o731g9mrusedq297qq35gra.apps.googleusercontent.com}
     image: vaulthaus:latest
     container_name: vaulthaus
     ports:
