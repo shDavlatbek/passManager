@@ -14,6 +14,7 @@ declare global {
             client_id: string;
             scope: string;
             callback: (response: { access_token?: string; expires_in?: number; error?: string; error_description?: string }) => void;
+            error_callback?: (err: { type?: string; message?: string }) => void;
           }) => { requestAccessToken: (overrideConfig?: { prompt?: string }) => void };
           revoke: (token: string, done: () => void) => void;
         };
@@ -101,6 +102,36 @@ export async function connectGoogleDrive(prompt: "" | "consent" = ""): Promise<D
   }
   await loadGsi();
   return new Promise<DriveAuth>((resolve, reject) => {
+    let settled = false;
+    let lostFocus = false;
+    let graceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const cleanup = () => {
+      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("focus", onFocus);
+      if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; }
+    };
+    const settle = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      fn();
+    };
+    function onBlur() { lostFocus = true; }
+    function onFocus() {
+      if (!lostFocus || settled) return;
+      // Popup was closed (or user tabbed back). Give GSI's callbacks ~2s to land;
+      // if nothing settles in that window, treat it as popup-closed.
+      if (graceTimer) clearTimeout(graceTimer);
+      graceTimer = setTimeout(() => {
+        settle(() => reject(
+          new DriveError("popup-closed", "You closed the Google sign-in window.", "focus_timeout"),
+        ));
+      }, 2000);
+    }
+    window.addEventListener("blur", onBlur);
+    window.addEventListener("focus", onFocus);
+
     const client = window.google!.accounts.oauth2.initTokenClient({
       client_id: clientId,
       scope: SCOPE,
@@ -108,19 +139,19 @@ export async function connectGoogleDrive(prompt: "" | "consent" = ""): Promise<D
         if (response.error || !response.access_token) {
           const raw = response.error || "unknown";
           if (raw === "access_denied") {
-            reject(
+            settle(() => reject(
               new DriveError(
                 "denied",
-                "Google blocked the sign-in. Most likely your email isn't on the OAuth client's Test users list — see panel below.",
+                "Google didn't grant Drive access. You can try again below.",
                 raw,
               ),
-            );
+            ));
           } else if (raw === "popup_closed" || raw === "popup_closed_by_user") {
-            reject(new DriveError("popup-closed", "You closed the Google sign-in window.", raw));
+            settle(() => reject(new DriveError("popup-closed", "You closed the Google sign-in window.", raw)));
           } else if (raw === "popup_blocked_by_browser") {
-            reject(new DriveError("popup-blocked", "Your browser blocked the Google sign-in popup. Allow popups for this site and retry.", raw));
+            settle(() => reject(new DriveError("popup-blocked", "Your browser blocked the Google sign-in popup. Allow popups for this site and retry.", raw)));
           } else {
-            reject(new DriveError("other", response.error_description || raw, raw));
+            settle(() => reject(new DriveError("other", response.error_description || raw, raw)));
           }
           return;
         }
@@ -129,7 +160,17 @@ export async function connectGoogleDrive(prompt: "" | "consent" = ""): Promise<D
           expiresAt: Date.now() + (response.expires_in ?? 3600) * 1000,
         };
         try { localStorage.setItem(TOKEN_KEY, JSON.stringify(auth)); } catch { /* noop */ }
-        resolve(auth);
+        settle(() => resolve(auth));
+      },
+      error_callback: (err) => {
+        const type = err?.type || "unknown";
+        if (type === "popup_closed") {
+          settle(() => reject(new DriveError("popup-closed", "You closed the Google sign-in window.", type)));
+        } else if (type === "popup_failed_to_open") {
+          settle(() => reject(new DriveError("popup-blocked", "Your browser blocked the Google sign-in popup. Allow popups for this site and retry.", type)));
+        } else {
+          settle(() => reject(new DriveError("other", err?.message || type, type)));
+        }
       },
     });
     client.requestAccessToken({ prompt });
@@ -212,6 +253,19 @@ export async function uploadVaultToDrive(payload: object): Promise<DriveFileInfo
   if (!r.ok) throw new Error("Upload failed: " + r.status);
   const f = (await r.json()) as { id: string; modifiedTime: string; size?: string };
   return { id: f.id, modifiedTime: f.modifiedTime, size: f.size ? parseInt(f.size, 10) : undefined };
+}
+
+export async function deleteVaultFromDrive(): Promise<boolean> {
+  const token = await ensureToken();
+  const info = await getRemoteInfo();
+  if (!info) return false;
+  const r = await driveFetch(
+    `https://www.googleapis.com/drive/v3/files/${info.id}`,
+    { method: "DELETE" },
+    token,
+  );
+  if (!r.ok && r.status !== 204) throw new Error("Delete failed: " + r.status);
+  return true;
 }
 
 export async function downloadVaultFromDrive(): Promise<unknown | null> {

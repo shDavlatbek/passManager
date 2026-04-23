@@ -1,6 +1,7 @@
 "use client";
 import { useEffect } from "react";
 import { useVaultStore } from "@/lib/vault-store";
+import { ConfirmProvider } from "@/components/ConfirmDialog";
 
 function IdleLock() {
   const { meta, status, lastActivity, lock } = useVaultStore();
@@ -46,11 +47,11 @@ function LockOnHide() {
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
-    <>
+    <ConfirmProvider>
       <InitVault />
       <IdleLock />
       <LockOnHide />
       {children}
-    </>
+    </ConfirmProvider>
   );
 }

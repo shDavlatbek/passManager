@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useVaultStore } from "@/lib/vault-store";
 import {
   connectGoogleDrive,
+  deleteVaultFromDrive,
   disconnectGoogleDrive,
   downloadVaultFromDrive,
   DriveError,
@@ -14,15 +15,17 @@ import {
   type DriveFileInfo,
 } from "@/lib/gdrive";
 import { PageHeader } from "@/components/VaultShell";
-import { Cloud, CloudUp, CloudDown, LinkBreak, Refresh, AlertTriangle, Check, ArrowRight } from "@/components/icons";
+import { useConfirm } from "@/components/ConfirmDialog";
+import { Cloud, CloudUp, CloudDown, LinkBreak, Refresh, AlertTriangle, Check, Trash } from "@/components/icons";
 
 type Status = { kind: "ok" | "err" | "info"; text: string } | null;
 
 export default function SyncPage() {
   const router = useRouter();
+  const confirm = useConfirm();
   const { entries, serializeBackup, restoreFromBackup, lock } = useVaultStore();
   const [connected, setConnected] = useState(false);
-  const [busy, setBusy] = useState<null | "connect" | "upload" | "download" | "info">(null);
+  const [busy, setBusy] = useState<null | "connect" | "upload" | "download" | "delete" | "info">(null);
   const [remote, setRemote] = useState<DriveFileInfo | null>(null);
   const [status, setStatus] = useState<Status>(null);
   const [denied, setDenied] = useState(false);
@@ -319,64 +322,22 @@ function ServerErrorPanel({
         </div>
         <div className="flex-1 space-y-3">
           <div>
-            <h2 className="font-display font-bold text-base">Google returned an error</h2>
-            <p className="text-sm text-[var(--color-muted-strong)] mt-1 leading-relaxed">{message}</p>
-            {raw && raw !== message && (
-              <p className="text-[11px] font-mono text-[var(--color-muted)] mt-1">code: {raw}</p>
+            <h2 className="font-display font-bold text-base">Couldn&apos;t connect to Google Drive</h2>
+            <p className="text-sm text-[var(--color-muted-strong)] mt-1 leading-relaxed">
+              Google returned an error while authorizing. This is usually temporary — please try again in a moment.
+              If it keeps happening, try a different browser or an incognito window.
+            </p>
+            {raw && (
+              <p className="text-[11px] font-mono text-[var(--color-muted)] mt-2">
+                {message}
+                {raw !== message && <> · code: {raw}</>}
+              </p>
             )}
           </div>
 
-          <div className="rounded-md bg-[var(--color-surface-2)] border border-[var(--color-border)] p-4">
-            <div className="text-[11px] uppercase tracking-[0.15em] text-[var(--color-muted)] mb-2">
-              Most common causes (in order)
-            </div>
-            <ol className="list-decimal list-outside ml-5 text-sm text-[var(--color-muted-strong)] space-y-2 leading-relaxed">
-              <li>
-                <strong className="text-[var(--color-text)]">OAuth consent screen has empty required fields.</strong>{" "}
-                Open the consent screen and click through every step — make sure App name, User support email, and Developer contact email are all filled in. Save.
-              </li>
-              <li>
-                <strong className="text-[var(--color-text)]">The <span className="font-mono text-xs">drive.appdata</span> scope isn&apos;t added to the consent screen.</strong>{" "}
-                On the consent screen → Scopes step → Add or remove scopes → search <span className="font-mono text-xs">drive.appdata</span> → check it → Update → Save.
-              </li>
-              <li>
-                <strong className="text-[var(--color-text)]">Recent changes haven&apos;t propagated.</strong>{" "}
-                Google&apos;s OAuth caches can take 5–10 minutes after you edit the consent screen or create the client ID. Wait a few minutes and retry.
-              </li>
-              <li>
-                <strong className="text-[var(--color-text)]">Browser has stale OAuth cookies.</strong>{" "}
-                Try in an incognito window, or clear cookies for <span className="font-mono text-xs">accounts.google.com</span>.
-              </li>
-              <li>
-                <strong className="text-[var(--color-text)]">Authorized JavaScript origin doesn&apos;t exactly match.</strong>{" "}
-                The current origin is{" "}
-                <span className="font-mono text-xs bg-[var(--color-bg)] px-1.5 py-0.5 rounded">
-                  {typeof window !== "undefined" ? window.location.origin : "—"}
-                </span>
-                . That exact string (no trailing slash) must be in your OAuth client&apos;s Authorized JavaScript origins.
-              </li>
-            </ol>
-          </div>
-
           <div className="flex flex-wrap items-center gap-2 pt-1">
-            <a
-              href="https://console.cloud.google.com/apis/credentials/consent"
-              target="_blank"
-              rel="noreferrer"
-              className="btn btn-primary"
-            >
-              Open OAuth consent screen <ArrowRight className="w-4 h-4" />
-            </a>
-            <a
-              href="https://console.cloud.google.com/apis/credentials"
-              target="_blank"
-              rel="noreferrer"
-              className="btn btn-secondary"
-            >
-              Open Credentials <ArrowRight className="w-4 h-4" />
-            </a>
-            <button onClick={onRetry} className="btn btn-secondary">
-              <Refresh className="w-4 h-4" /> Retry sign-in
+            <button onClick={onRetry} className="btn btn-primary">
+              <Refresh className="w-4 h-4" /> Try again
             </button>
             <button onClick={onDismiss} className="btn btn-ghost text-xs">Dismiss</button>
           </div>
@@ -395,53 +356,23 @@ function DeniedHelpPanel({ onRetry, onDismiss }: { onRetry: () => void; onDismis
         </div>
         <div className="flex-1 space-y-3">
           <div>
-            <h2 className="font-display font-bold text-base">Google blocked the sign-in</h2>
+            <h2 className="font-display font-bold text-base">Access wasn&apos;t granted</h2>
             <p className="text-sm text-[var(--color-muted-strong)] mt-1 leading-relaxed">
-              Your OAuth app is in <strong>Testing</strong> mode, so only emails listed under <em>Test users</em> can sign in.
-              The email you tried isn&apos;t on that list yet.
+              Google didn&apos;t grant Drive access — either the permission was declined, or the sign-in was canceled before it finished.
+              Vaulthaus only needs its own hidden app folder and never reads the rest of your Drive.
             </p>
           </div>
 
-          <div className="rounded-md bg-[var(--color-surface-2)] border border-[var(--color-border)] p-4">
-            <div className="text-[11px] uppercase tracking-[0.15em] text-[var(--color-muted)] mb-2">Fix in 30 seconds</div>
-            <ol className="list-decimal list-outside ml-5 text-sm text-[var(--color-muted-strong)] space-y-1.5 leading-relaxed">
-              <li>
-                Open the OAuth consent screen in Google Cloud Console — pick the project that owns your client ID.
-              </li>
-              <li>
-                Scroll to <strong className="text-[var(--color-text)]">Test users</strong> → click <strong className="text-[var(--color-text)]">+ Add users</strong>.
-              </li>
-              <li>Add the Google email you&apos;re trying to sign in with. Save.</li>
-              <li>Come back here and click Retry.</li>
-            </ol>
-          </div>
-
           <div className="flex flex-wrap items-center gap-2 pt-1">
-            <a
-              href="https://console.cloud.google.com/apis/credentials/consent"
-              target="_blank"
-              rel="noreferrer"
-              className="btn btn-primary"
-            >
-              Open OAuth consent screen <ArrowRight className="w-4 h-4" />
-            </a>
-            <button onClick={onRetry} className="btn btn-secondary">
-              <Refresh className="w-4 h-4" /> Retry sign-in
+            <button onClick={onRetry} className="btn btn-primary">
+              <Refresh className="w-4 h-4" /> Try again
             </button>
             <button onClick={onDismiss} className="btn btn-ghost text-xs">Dismiss</button>
           </div>
 
-          <details className="text-[11px] text-[var(--color-muted)] pt-1">
-            <summary className="cursor-pointer hover:text-[var(--color-muted-strong)]">
-              Want anyone to sign in without test-user listing?
-            </summary>
-            <p className="mt-2 leading-relaxed">
-              In the OAuth consent screen, click <strong>Publish app</strong>. Because <span className="font-mono">drive.appdata</span> is a sensitive scope,
-              users will see an &quot;unverified app&quot; warning until you complete{" "}
-              <a className="underline hover:text-[var(--color-text)]" href="https://support.google.com/cloud/answer/13463073" target="_blank" rel="noreferrer">Google&apos;s verification</a> —
-              but the warning is click-through, so the app still works.
-            </p>
-          </details>
+          <p className="text-[11px] text-[var(--color-muted)] pt-1 leading-relaxed">
+            Using a work or school Google account? Your administrator may block third-party apps — try signing in with a personal Google account instead.
+          </p>
         </div>
       </div>
     </div>

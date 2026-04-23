@@ -9,7 +9,7 @@ function readInitial(): Theme {
   if (typeof window === "undefined") return "light";
   const stored = localStorage.getItem(KEY);
   if (stored === "dark" || stored === "light") return stored;
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  return "light";
 }
 
 export function applyTheme(theme: Theme) {
@@ -25,7 +25,7 @@ export function useThemeSync() {
 }
 
 export function ThemeToggle() {
-  const [theme, setTheme] = useState<Theme>("dark");
+  const [theme, setTheme] = useState<Theme>("light");
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
