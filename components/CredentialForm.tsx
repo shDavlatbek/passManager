@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useVaultStore } from "@/lib/vault-store";
 import { StrengthMeter } from "@/components/StrengthMeter";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { generatePassword } from "@/lib/generator";
 import { isValidBase32, parseOtpAuthUrl } from "@/lib/totp";
 import type { DecryptedEntry } from "@/types/vault";
@@ -10,6 +11,7 @@ import { Eye, EyeOff, Refresh, Trash, Key, X } from "@/components/icons";
 
 export function CredentialForm({ entry }: { entry?: DecryptedEntry }) {
   const router = useRouter();
+  const confirm = useConfirm();
   const { saveEntry, removeEntry, meta } = useVaultStore();
   const genDefaults = meta?.settings.defaultGenerator;
 
@@ -71,7 +73,13 @@ export function CredentialForm({ entry }: { entry?: DecryptedEntry }) {
 
   async function handleDelete() {
     if (!entry) return;
-    if (!confirm(`Delete ${entry.service}? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: `Delete "${entry.service}"?`,
+      description: "This credential will be permanently removed from your vault on this device. This cannot be undone.",
+      confirmLabel: "Delete credential",
+      tone: "danger",
+    });
+    if (!ok) return;
     await removeEntry(entry.id);
     router.replace("/vault");
   }

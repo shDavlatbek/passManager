@@ -86,7 +86,13 @@ export default function SyncPage() {
   }
 
   async function handleDisconnect() {
-    if (!confirm("Disconnect from Google Drive? Your cloud copy stays put — only this device forgets the access token.")) return;
+    const ok = await confirm({
+      title: "Disconnect Google Drive?",
+      description: "Your cloud backup stays put — only this device forgets the access token. You can reconnect anytime.",
+      confirmLabel: "Disconnect",
+      tone: "warning",
+    });
+    if (!ok) return;
     setBusy("connect");
     try {
       await disconnectGoogleDrive();
@@ -124,10 +130,17 @@ export default function SyncPage() {
 
   async function handleDownload() {
     if (entries.length > 0) {
-      const ok = confirm(
-        `Restoring from Drive will REPLACE your local vault (${entries.length} entries) with the cloud copy. ` +
-        `You'll be redirected to the lock screen and need to unlock with the master password used at upload time. Continue?`,
-      );
+      const ok = await confirm({
+        title: "Replace local vault with cloud copy?",
+        description: (
+          <>
+            This replaces your local vault (<strong>{entries.length} {entries.length === 1 ? "entry" : "entries"}</strong>) with the backup stored in Drive.
+            You&apos;ll be sent to the lock screen and need to unlock with the master password used at upload time.
+          </>
+        ),
+        confirmLabel: "Restore from Drive",
+        tone: "warning",
+      });
       if (!ok) return;
     }
     setBusy("download");
@@ -144,6 +157,38 @@ export default function SyncPage() {
       setTimeout(() => router.replace("/"), 600);
     } catch (err) {
       setStatus({ kind: "err", text: err instanceof Error ? err.message : "Restore failed" });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleDeleteRemote() {
+    const ok = await confirm({
+      title: "Delete backup from Drive?",
+      description: (
+        <>
+          This permanently removes your encrypted vault file from Google Drive.
+          Your local vault on this device is <strong>not</strong> affected, and you can re-upload at any time.
+        </>
+      ),
+      confirmLabel: "Delete from Drive",
+      tone: "danger",
+    });
+    if (!ok) return;
+    setBusy("delete");
+    setStatus(null);
+    try {
+      const deleted = await deleteVaultFromDrive();
+      setRemote(null);
+      localStorage.removeItem("vaulthaus.gdrive.lastUpload");
+      setLastUpload(null);
+      setStatus(
+        deleted
+          ? { kind: "ok", text: "Backup removed from Drive." }
+          : { kind: "info", text: "Nothing to delete — no backup in Drive." },
+      );
+    } catch (err) {
+      setStatus({ kind: "err", text: err instanceof Error ? err.message : "Delete failed" });
     } finally {
       setBusy(null);
     }
@@ -292,9 +337,30 @@ export default function SyncPage() {
             />
           </div>
 
+          <div className="card p-5 border-[rgba(240,84,79,0.25)]">
+            <div className="flex items-start gap-4">
+              <div className="w-9 h-9 rounded-[var(--radius-md)] bg-[var(--color-surface-2)] border border-[var(--color-border)] flex items-center justify-center text-[var(--color-danger)] shrink-0">
+                <Trash className="w-4 h-4" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-display font-bold text-sm">Delete backup from Drive</div>
+                <p className="text-xs text-[var(--color-muted-strong)] leading-relaxed mt-1">
+                  Permanently remove the encrypted vault file from your Drive. Your local vault on this device is not affected.
+                </p>
+              </div>
+              <button
+                onClick={handleDeleteRemote}
+                disabled={busy !== null || !remote}
+                className="btn btn-danger shrink-0"
+              >
+                {busy === "delete" ? "Deleting…" : (<><Trash className="w-4 h-4" /> Delete backup</>)}
+              </button>
+            </div>
+          </div>
+
           <p className="text-[11px] text-[var(--color-muted)] px-2 leading-relaxed">
             Vaulthaus uses the <span className="font-mono">drive.appdata</span> scope. The backup file is invisible from
-            drive.google.com — find it via Drive's API only. Revoke access anytime at{" "}
+            drive.google.com — find it via Drive&apos;s API only. Revoke access anytime at{" "}
             <a href="https://myaccount.google.com/permissions" target="_blank" rel="noreferrer" className="underline hover:text-[var(--color-text)]">myaccount.google.com/permissions</a>.
           </p>
         </div>

@@ -3,12 +3,14 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useVaultStore } from "@/lib/vault-store";
 import { PageHeader } from "@/components/VaultShell";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { Settings, Download, Lock, Trash } from "@/components/icons";
 import { analyzeStrength } from "@/lib/strength";
 import { listEntries, getVaultMeta } from "@/lib/db";
 
 export default function SettingsPage() {
   const router = useRouter();
+  const confirm = useConfirm();
   const { meta, entries, updateSettings, changeMasterPassword, wipeVault } = useVaultStore();
   const [autoLock, setAutoLock] = useState(meta?.settings.autoLockMinutes ?? 5);
   const [clip, setClip] = useState(meta?.settings.clipboardClearSeconds ?? 30);
@@ -37,7 +39,13 @@ export default function SettingsPage() {
   }
 
   async function exportPlain() {
-    if (!confirm("This will download your passwords in plain text. Continue?")) return;
+    const ok = await confirm({
+      title: "Export passwords in plain text?",
+      description: "The file will contain every password unencrypted. Store it only on a device you fully trust and delete it once you're done.",
+      confirmLabel: "Export plaintext",
+      tone: "warning",
+    });
+    if (!ok) return;
     const rows = entries.map((e) => ({
       service: e.service, url: e.url, username: e.username, password: e.password,
       notes: e.notes, totpSecret: e.totpSecret, tags: e.tags,
@@ -71,7 +79,13 @@ export default function SettingsPage() {
   }
 
   async function wipe() {
-    if (!confirm("Permanently wipe the vault on this device? This cannot be undone.")) return;
+    const ok = await confirm({
+      title: "Wipe vault on this device?",
+      description: "Removes vault metadata and every encrypted entry from this browser. This cannot be undone. Your Google Drive backup (if any) is not affected.",
+      confirmLabel: "Wipe vault",
+      tone: "danger",
+    });
+    if (!ok) return;
     await wipeVault();
     router.replace("/");
   }
