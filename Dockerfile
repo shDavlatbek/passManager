@@ -32,7 +32,6 @@ ENV PORT=3000
 
 RUN addgroup -S -g 1001 nextjs && adduser -S -u 1001 -G nextjs nextjs
 
-COPY --from=builder --chown=nextjs:nextjs /app/public ./public
 COPY --from=builder --chown=nextjs:nextjs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nextjs /app/.next/static ./.next/static
 
