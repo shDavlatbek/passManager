@@ -6,6 +6,7 @@ import { encodeShareLink, decodeShareLink, type SharePayload } from "@/lib/share
 import { analyzeStrength } from "@/lib/strength";
 import { PageHeader } from "@/components/VaultShell";
 import { CopyButton } from "@/components/CopyButton";
+import { Select } from "@/components/Select";
 import { Share, Upload, Check } from "@/components/icons";
 
 function ShareInner() {
@@ -116,12 +117,17 @@ function ShareInner() {
 
       {tab === "out" && (
         <div className="card p-7 space-y-6">
-          <Label>Select a credential to share</Label>
-          <select className="select" value={selectedId} onChange={(e) => setSelectedId(e.target.value)}>
-            {entries.map((e) => (
-              <option key={e.id} value={e.id}>{e.service}{e.username ? ` — ${e.username}` : ""}</option>
-            ))}
-          </select>
+          <div>
+            <Label>Select a credential to share</Label>
+            <Select
+              value={selectedId}
+              onChange={setSelectedId}
+              options={entries.map((e) => ({ value: e.id, label: e.service, hint: e.username }))}
+              placeholder={entries.length === 0 ? "No credentials yet" : "Pick a credential…"}
+              disabled={entries.length === 0}
+              ariaLabel="Credential to share"
+            />
+          </div>
 
           <div>
             <Label>Share password</Label>

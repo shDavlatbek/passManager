@@ -24,6 +24,12 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (status === "empty" || status === "locked") {
+      if (typeof window !== "undefined") {
+        const target = window.location.pathname + window.location.search + window.location.hash;
+        if (target && target !== "/") {
+          sessionStorage.setItem("vaulthaus.redirectAfterUnlock", target);
+        }
+      }
       router.replace("/");
     }
   }, [status, router]);

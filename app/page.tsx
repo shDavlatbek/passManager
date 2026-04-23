@@ -8,6 +8,14 @@ import { analyzeStrength } from "@/lib/strength";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Lock, LockOpen, Sparkle, ArrowRight, Shield } from "@/components/icons";
 
+function consumeRedirect(fallback: string): string {
+  if (typeof window === "undefined") return fallback;
+  const saved = sessionStorage.getItem("vaulthaus.redirectAfterUnlock");
+  if (!saved) return fallback;
+  sessionStorage.removeItem("vaulthaus.redirectAfterUnlock");
+  return saved;
+}
+
 export default function LockScreen() {
   const router = useRouter();
   const { status, unlock, createVault } = useVaultStore();
@@ -18,7 +26,7 @@ export default function LockScreen() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (status === "unlocked") router.replace("/vault");
+    if (status === "unlocked") router.replace(consumeRedirect("/vault"));
     if (status === "empty") setMode("create");
     if (status === "locked") setMode("unlock");
   }, [status, router]);
@@ -51,7 +59,9 @@ export default function LockScreen() {
           return;
         }
       }
-      router.replace("/vault");
+      // Navigation is handled by the useEffect watching status === "unlocked"
+      // so we only consume the stored redirect once (avoids a race where the
+      // fallback overwrites the real target).
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unexpected error");
     } finally {
