@@ -1,0 +1,784 @@
+<html lang="en"><head>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html-to-image/1.11.13/html-to-image.min.js" integrity="sha512-iZ2ORl595Wx6miw+GuadDet4WQbdSWS3JLMoNfY8cRGoEFy6oT3G9IbcrBeL6AfkgpA51ETt/faX6yLV+/gFJg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script>
+      (function() {
+        const originalConsole = window.console;
+        window.console = {
+          log: (...args) => {
+            originalConsole.log(...args);
+            window.parent.postMessage({ type: 'console', message: args.join(' ') }, '*');
+          },
+          error: (...args) => {
+            originalConsole.error(...args);
+            window.parent.postMessage({ type: 'console', message: 'Error: ' + args.join(' ') }, '*');
+          },
+          warn: (...args) => {
+            originalConsole.warn(...args);
+            window.parent.postMessage({ type: 'console', message: 'Warning: ' + args.join(' ') }, '*');
+          }
+        };
+
+        let requestId = 0;
+        let callbacksMap = new Map();
+        let streamControllers = new Map();
+        
+        window.claude = {
+          complete: (prompt) => {
+            return new Promise((resolve, reject) => {
+              const id = requestId++;
+              callbacksMap.set(id, { resolve, reject });
+              window.parent.postMessage({ type: 'claudeComplete', id, prompt }, '*');
+            });
+          }
+        };
+
+        window.storage = {
+          get: (key, shared = false) => {
+            return new Promise((resolve, reject) => {
+              const id = requestId++;
+              callbacksMap.set(id, { resolve, reject });
+              window.parent.postMessage({ type: 'storageGet', id, key, shared }, '*');
+            });
+          },
+          set: (key, value, shared = false) => {
+            return new Promise((resolve, reject) => {
+              const id = requestId++;
+              callbacksMap.set(id, { resolve, reject });
+              window.parent.postMessage({ type: 'storageSet', id, key, value, shared }, '*');
+            });
+          },
+          delete: (key, shared = false) => {
+            return new Promise((resolve, reject) => {
+              const id = requestId++;
+              callbacksMap.set(id, { resolve, reject });
+              window.parent.postMessage({ type: 'storageDelete', id, key, shared }, '*');
+            });
+          },
+          list: (prefix, shared = false) => {
+            return new Promise((resolve, reject) => {
+              const id = requestId++;
+              callbacksMap.set(id, { resolve, reject });
+              window.parent.postMessage({ type: 'storageList', id, prefix, shared }, '*');
+            });
+          }
+        };
+
+        let pendingBlobs = new Map();
+        URL.createObjectURL = (blob) => {
+          // Store the blob and create an ID and URL for it
+          const blobId = `blob-${Date.now()}-${Math.random()}`;
+          pendingBlobs.set(blobId, blob);
+          return `blob-request://${blobId}`;
+        };
+
+        URL.revokeObjectURL = (url) => {
+          // Remove the blob from our store
+          const blobId = url.replace("blob-request://", "");
+          pendingBlobs.delete(blobId);
+        };
+
+        const getBlobFromURL = (url) => {
+          const blobId = url.replace("blob-request://", "");
+          return pendingBlobs.get(blobId);
+        };
+
+        // Override global fetch with streaming support
+        window.fetch = (url, init = {}) => {
+          return new Promise((resolve, reject) => {
+            const id = requestId++;
+            const channelId = `fetch-${id}-${Date.now()}`;
+            
+            callbacksMap.set(id, { 
+              resolve: (response) => {
+                // Create a ReadableStream for the response body
+                const stream = new ReadableStream({
+                  start(controller) {
+                    streamControllers.set(channelId, controller);
+                  },
+                  cancel() {
+                    streamControllers.delete(channelId);
+                  }
+                });
+                
+                // Create and return the Response with the stream
+                resolve(new Response(stream, {
+                  status: response.status,
+                  statusText: response.statusText,
+                  headers: response.headers
+                }));
+              },
+              reject,
+              channelId
+            });
+            
+            window.parent.postMessage({
+              type: 'proxyFetch',
+              id,
+              url,
+              init,
+              channelId
+            }, '*');
+          });
+        };
+
+        window.addEventListener('message', async (event) => {
+          if (event.data.type === 'takeScreenshot') {
+            const rootElement = document.getElementById('artifacts-component-root-html');
+            if (!rootElement) {
+              window.parent.postMessage({
+                type: 'screenshotError',
+                error: new Error('Root element not found'),
+              }, '*');
+            }
+            const screenshot = await htmlToImage.toPng(rootElement, {
+              imagePlaceholder:
+                "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAA1JREFUGFdjePDgwX8ACOQDoNsk0PMAAAAASUVORK5CYII=",
+            });
+            window.parent.postMessage({
+              type: 'screenshotData',
+              data: screenshot,
+            }, '*');
+          } else if (event.data.type === 'claudeComplete') {
+            const callback = callbacksMap.get(event.data.id);
+            if (event.data.error) {
+              callback.reject(new Error(event.data.error));
+            } else {
+              callback.resolve(event.data.completion);
+            }
+            callbacksMap.delete(event.data.id);
+          } else if (event.data.type === 'proxyFetchResponse') {
+            const callback = callbacksMap.get(event.data.id);
+            if (event.data.error) {
+              callback.reject(new Error(event.data.error));
+              callbacksMap.delete(event.data.id);
+            } else {
+              // Initial response with headers, status, etc.
+              callback.resolve({
+                status: event.data.status,
+                statusText: event.data.statusText,
+                headers: event.data.headers
+              });
+              // Don't delete the callback yet if streaming
+              if (!event.data.body) {
+                callbacksMap.delete(event.data.id);
+              }
+            }
+          } else if (event.data.type === 'proxyFetchStream') {
+            // Handle streaming data chunks
+            const controller = streamControllers.get(event.data.channelId);
+            if (controller) {
+              if (event.data.error) {
+                controller.error(new Error(event.data.error));
+                streamControllers.delete(event.data.channelId);
+              } else if (event.data.done) {
+                controller.close();
+                streamControllers.delete(event.data.channelId);
+                // Clean up the callback
+                const callback = Array.from(callbacksMap.entries()).find(
+                  ([_, value]) => value.channelId === event.data.channelId
+                );
+                if (callback) {
+                  callbacksMap.delete(callback[0]);
+                }
+              } else if (event.data.chunk) {
+                controller.enqueue(new Uint8Array(event.data.chunk));
+              }
+            }
+          } else if (event.data.type === 'storageGet') {
+            const callback = callbacksMap.get(event.data.id);
+            if (event.data.error) {
+              callback.reject(new Error(event.data.error));
+            } else {
+              callback.resolve(event.data.result);
+            }
+            callbacksMap.delete(event.data.id);
+          } else if (event.data.type === 'storageSet') {
+            const callback = callbacksMap.get(event.data.id);
+            if (event.data.error) {
+              callback.reject(new Error(event.data.error));
+            } else {
+              callback.resolve(event.data.result);
+            }
+            callbacksMap.delete(event.data.id);
+          } else if (event.data.type === 'storageDelete') {
+            const callback = callbacksMap.get(event.data.id);
+            if (event.data.error) {
+              callback.reject(new Error(event.data.error));
+            } else {
+              callback.resolve(event.data.result);
+            }
+            callbacksMap.delete(event.data.id);
+          } else if (event.data.type === 'storageList') {
+            const callback = callbacksMap.get(event.data.id);
+            if (event.data.error) {
+              callback.reject(new Error(event.data.error));
+            } else {
+              callback.resolve(event.data.result);
+            }
+            callbacksMap.delete(event.data.id);
+          }
+        });
+
+        window.addEventListener('click', (event) => {
+          const isEl = event.target instanceof HTMLElement;
+          if (!isEl) return;
+    
+          // find ancestor links
+          const linkEl = event.target.closest("a");
+          if (!linkEl || !linkEl.href) return;
+    
+          event.preventDefault();
+          event.stopImmediatePropagation();
+    
+          if (linkEl.href.startsWith("blob-request:")) {
+            const blob = getBlobFromURL(linkEl.href);
+            if (!blob) return;
+            void blob.arrayBuffer().then((data) => {
+              window.parent.postMessage({
+                type: "downloadFile",
+                filename: linkEl.download,
+                data,
+                mimeType: blob.type || "application/octet-stream",
+              });
+            });
+          } else if (linkEl.href.startsWith("data:")) {
+            const [header, base64Data] = linkEl.href.split(",");
+            const mimeMatch = header.match(/data:([^;]+)/);
+            const mimeType = mimeMatch ? mimeMatch[1] : "application/octet-stream";
+            const binaryString = atob(base64Data);
+            const data = Uint8Array.from(binaryString, (c) =>
+              c.charCodeAt(0),
+            ).buffer;
+            window.parent.postMessage({
+              type: "downloadFile",
+              filename: linkEl.download,
+              data,
+              mimeType,
+            });
+          } else {
+            let linkUrl;
+            try {
+              linkUrl = new URL(linkEl.href);
+            } catch (error) {
+              return;
+            }
+    
+            if (linkUrl.hostname === window.location.hostname) return;
+      
+            window.parent.postMessage({
+              type: 'openExternal',
+              href: linkEl.href,
+            }, '*');
+          }
+      });
+
+        const originalOpen = window.open;
+        window.open = function (url) {
+          window.parent.postMessage({
+            type: "openExternal",
+            href: url,
+          }, "*");
+        };
+
+        window.addEventListener('error', (event) => {
+          window.parent.postMessage({ type: 'console', message: 'Uncaught Error: ' + event.message }, '*');
+        });
+      })();
+    </script>
+  
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Candidate Tasks — data365 Agency</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&amp;family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&amp;display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #f5f4ef; --surface: #ffffff; --border: #dddbd3;
+    --accent2: #c8f135; --text: #1a1a1a; --muted: #888;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'DM Mono', monospace; font-weight: 300; line-height: 1.75; }
+  .page { max-width: 820px; margin: 0 auto; padding: 60px 40px 100px; }
+
+  .agency-header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 28px; border-bottom: 2px solid var(--text); margin-bottom: 56px; }
+  .agency-name { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 22px; letter-spacing: -0.5px; }
+  .agency-meta { font-size: 11px; color: var(--muted); text-align: right; line-height: 2; letter-spacing: 0.05em; }
+
+  .intro { background: var(--text); color: var(--bg); padding: 36px 40px; margin-bottom: 64px; border-radius: 2px; }
+  .intro h2 { font-family: 'Syne', sans-serif; font-size: 18px; font-weight: 700; margin-bottom: 14px; }
+  .intro p { font-size: 13px; line-height: 1.85; color: #c8c8c0; }
+  .intro p + p { margin-top: 12px; }
+  .rules { margin-top: 20px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .rule-pill { background: #2e2e2e; color: var(--accent2); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; padding: 6px 14px; border-radius: 2px; font-weight: 500; }
+
+  .task { background: var(--surface); border: 1px solid var(--border); border-radius: 3px; margin-bottom: 48px; overflow: hidden; }
+  .task-header { display: flex; align-items: center; gap: 20px; padding: 28px 36px; border-bottom: 1px solid var(--border); }
+  .task-number { font-family: 'Syne', sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); flex-shrink: 0; }
+  .task-title { font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 800; letter-spacing: -0.5px; flex: 1; }
+  .difficulty { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; padding: 5px 12px; border-radius: 2px; font-weight: 500; flex-shrink: 0; }
+  .diff-medium { background: #fff8e1; color: #b8860b; }
+  .diff-hard { background: #ffeaea; color: #c0392b; }
+
+  .task-body { padding: 32px 36px; }
+  .context-label { font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; font-weight: 500; }
+  .context-text { font-size: 13.5px; color: #444; margin-bottom: 32px; line-height: 1.85; }
+
+  .section-title { font-family: 'Syne', sans-serif; font-size: 12px; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; color: var(--text); margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+
+  .req-list { list-style: none; margin-bottom: 32px; }
+  .req-list li { font-size: 13.5px; padding: 10px 0; border-bottom: 1px solid #f0ede6; display: flex; gap: 12px; align-items: flex-start; line-height: 1.7; }
+  .req-list li:last-child { border-bottom: none; }
+  .req-list li::before { content: '→'; color: var(--muted); flex-shrink: 0; margin-top: 2px; }
+  .li-wrap { display: flex; flex-direction: column; gap: 0; }
+  .sub { margin-top: 7px; color: #666; font-size: 12.5px; line-height: 2; }
+  .sub span { display: block; }
+  .sub span::before { content: '· '; color: #bbb; }
+
+  .open-block { background: #f9f8f4; border-left: 3px solid var(--accent2); padding: 20px 24px; margin-bottom: 32px; border-radius: 0 2px 2px 0; }
+  .open-block strong { display: block; font-family: 'Syne', sans-serif; font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--text); margin-bottom: 8px; }
+  .open-block p { font-size: 13px; color: #555; line-height: 1.85; }
+
+  .ux-note { background: #fffbf0; border: 1px solid #f0e0a0; border-radius: 2px; padding: 18px 22px; margin-bottom: 32px; font-size: 13px; color: #665500; line-height: 1.8; }
+  .ux-note strong { font-family: 'Syne', sans-serif; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; display: block; margin-bottom: 6px; color: #b8860b; }
+
+  .bonus-block { background: #f2fcf2; border: 1.5px solid #7ed67e; border-radius: 2px; padding: 20px 24px; margin-bottom: 32px; font-size: 13px; color: #1a3a1a; line-height: 1.85; }
+  .bonus-block strong { font-family: 'Syne', sans-serif; font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase; display: block; margin-bottom: 8px; color: #2e7d2e; }
+
+  .deliverables { background: var(--text); color: #ccc; padding: 24px 30px; border-radius: 2px; font-size: 13px; line-height: 2; }
+  .deliverables strong { color: var(--accent2); display: block; font-family: 'Syne', sans-serif; font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; margin-bottom: 10px; }
+  .deliverables li { list-style: none; padding: 3px 0; }
+  .deliverables li::before { content: '✓  '; color: var(--accent2); }
+
+  .doc-footer { margin-top: 64px; padding-top: 24px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+
+  @media print { body { background: white; } .task { break-inside: avoid; } }
+  @media (max-width: 600px) {
+    .page { padding: 32px 20px 80px; }
+    .task-header { flex-wrap: wrap; padding: 20px 24px; }
+    .task-body { padding: 24px 20px; }
+    .agency-header { flex-direction: column; gap: 12px; }
+    .agency-meta { text-align: left; }
+  }
+</style>
+</head>
+<body id="artifacts-component-root-html">
+<div class="page">
+
+  <div class="agency-header">
+    <div class="agency-name">data365 agency</div>
+    <div class="agency-meta">CANDIDATE ASSESSMENT TASKS<br>ONE-DAY CHALLENGE · 2025</div>
+  </div>
+
+  <div class="intro">
+    <h2>Before You Start — Read This</h2>
+    <p>You have <strong style="color:white">one working day</strong> to complete your assigned task. The requirements are intentionally short. We want to see how you think, what you research, what decisions you make, and how much you care about the experience you build — not just whether it works.</p>
+    <p>You will be evaluated on three things equally: <strong style="color:white">does it work</strong>, <strong style="color:white">does it look good</strong>, and <strong style="color:white">is the experience smooth</strong>. We use AI tools every day — we expect you to use them too. What matters is the result, not the method.</p>
+    <p>There is no single right answer. Two candidates given the same task should produce two completely different products. That is the point.</p>
+    <div class="rules">
+      <span class="rule-pill">1 Day Deadline</span>
+      <span class="rule-pill">Working App Required</span>
+      <span class="rule-pill">UX is Graded</span>
+      <span class="rule-pill">AI Tools Allowed</span>
+      <span class="rule-pill">GitHub Repo</span>
+    </div>
+  </div>
+
+
+  <!-- TASK 01 -->
+  <div class="task">
+    <div class="task-header">
+      <span class="task-number">Task 01</span>
+      <span class="task-title">Business Finance Manager</span>
+      <span class="difficulty diff-hard">Hard</span>
+    </div>
+    <div class="task-body">
+
+      <div class="context-label">Context</div>
+      <div class="context-text">
+        Small and medium businesses in Uzbekistan manage their company cash flow through WhatsApp voice messages, paper notebooks, or scattered Excel files. There is no single place where the finance team or business owner can see what's coming in, what's going out, and where the money is actually going. Build a real product that solves this — a Telegram bot the team can speak to for logging transactions, connected to a proper company finance dashboard where management can monitor, analyze, and control business finances.
+      </div>
+
+      <div class="section-title">Part 1 — Telegram Bot</div>
+      <ul class="req-list">
+        <li>
+          <div class="li-wrap">
+            The bot accepts both voice messages and text
+            <div class="sub">
+              <span>Voice must be transcribed and interpreted automatically</span>
+              <span>The bot identifies the intent: logging income, logging an expense, requesting a report, asking a question about past data</span>
+            </div>
+          </div>
+        </li>
+        <li>
+          <div class="li-wrap">
+            Every transaction is captured completely
+            <div class="sub">
+              <span>Amount, type (income or expense), category, date</span>
+              <span>Optional note or comment if the user adds one</span>
+            </div>
+          </div>
+        </li>
+        <li>
+          <div class="li-wrap">
+            The bot responds in a natural, clear way — not robotic
+            <div class="sub">
+              <span>Confirms what it recorded in a readable format</span>
+              <span>If something is unclear, it asks a follow-up — it does not silently fail</span>
+            </div>
+          </div>
+        </li>
+        <li>
+          <div class="li-wrap">
+            The team can query company financial data through the bot
+            <div class="sub">
+              <span>"How much did we earn this week?" / "What did we spend on logistics this month?"</span>
+              <span>The bot replies with real numbers from saved data</span>
+            </div>
+          </div>
+        </li>
+        <li>The user can correct or delete a transaction they just added</li>
+        <li>The system supports multiple categories for both income and expenses, and the user can create custom ones</li>
+        <li>
+          <div class="li-wrap">
+            The bot handles ambiguous or incomplete input intelligently
+            <div class="sub">
+              <span>If the user says something like "50,000 received today" without a category — the bot should decide how to handle it. Ask? Make a smart guess? That's your call.</span>
+              <span>It should never silently save wrong data or crash on unclear input</span>
+            </div>
+          </div>
+        </li>
+      </ul>
+
+      <div class="section-title">Part 2 — Web Dashboard</div>
+      <ul class="req-list">
+        <li>
+          <div class="li-wrap">
+            A multi-page web application — not a single scrollable page
+            <div class="sub">
+              <span>Overview page with key metrics and recent activity</span>
+              <span>Transactions page — full list with filters and search</span>
+              <span>Analytics page — charts and breakdowns</span>
+              <span>Categories management page</span>
+            </div>
+          </div>
+        </li>
+        <li>
+          <div class="li-wrap">
+            The Overview page shows what matters at a glance
+            <div class="sub">
+              <span>Total income, total expenses, and net for the current period</span>
+              <span>Comparison with the previous period (e.g. this month vs last month)</span>
+              <span>A quick-add form — the user should be able to log a transaction without opening Telegram</span>
+            </div>
+          </div>
+        </li>
+        <li>
+          <div class="li-wrap">
+            The Transactions page is fully functional
+            <div class="sub">
+              <span>Filter by date range, category, and type</span>
+              <span>Inline edit and delete for any entry</span>
+            </div>
+          </div>
+        </li>
+        <li>The Analytics page should give the business owner a clear understanding of where their money is going and where it's coming from — how you present this is up to you</li>
+        <li>Data from the Telegram bot appears in the dashboard automatically — always in sync</li>
+        <li>
+          <div class="li-wrap">
+            The app has a proper onboarding experience for a brand new user
+            <div class="sub">
+              <span>What does someone see when they open this for the very first time with no data?</span>
+              <span>Empty states should guide — not confuse</span>
+            </div>
+          </div>
+        </li>
+        <li><strong>One feature we didn't ask for</strong> — build something you think this type of business genuinely needs. It will be evaluated.</li>
+      </ul>
+
+      <div class="ux-note">
+        <strong>⚠ UX Warning</strong>
+        A dashboard that works but looks like a generic template will not pass review. We build products for real businesses. The interface should feel polished, intentional, and trustworthy. Pay attention to how information is organized, how data is presented, and how the layout guides the user — not just whether the numbers show up.
+      </div>
+
+      <div class="bonus-block">
+        <strong>🌟 Bonus — We Highly Rate This</strong>
+        The requirements above are the minimum. You are not just allowed to go beyond them — we actively want you to. Any feature, detail, flow, or idea you add on top of what's written here will be rated separately and weighted heavily in our evaluation. The candidates who impress us most are always the ones who saw a problem we didn't mention and solved it anyway. Show us how you think when nobody is telling you what to build.
+      </div>
+
+      <div class="open-block">
+        <strong>What We Leave Open to You</strong>
+        <p>What language does the bot respond in? What default categories make sense for a small Uzbek business? How do you handle currency? How does the dashboard feel on first open — before any data exists? What is your one extra feature, and why did you choose it? These are your decisions. Make them deliberately.</p>
+      </div>
+
+      <div class="deliverables">
+        <strong>Submit</strong>
+        <ul>
+          <li>GitHub repo with a README that actually works — setup instructions must be clear</li>
+          <li>Working Telegram bot — share the username so we can test it live</li>
+          <li>Web dashboard — deployed link preferred, or localhost with clear run instructions</li>
+          <li>A short screen recording showing the full flow: voice message → bot response → dashboard update</li>
+          <li>A product brief — 3 to 5 sentences max: who is this for, what problem does it solve, what would v2 look like</li>
+          <li>One paragraph: what would you add next if you had 3 more days?</li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+
+
+  <!-- TASK 02 -->
+  <div class="task">
+    <div class="task-header">
+      <span class="task-number">Task 02</span>
+      <span class="task-title">Password Manager</span>
+      <span class="difficulty diff-medium">Medium</span>
+    </div>
+    <div class="task-body">
+
+      <div class="context-label">Context</div>
+      <div class="context-text">
+        Companies deal with dozens of shared credentials — CRM logins, cloud platforms, social media accounts, internal tools, client portals. These passwords get passed around in Telegram chats, written in notes, or reused everywhere. Build a team password manager — a secure, well-structured web application where a company can store, manage, and control access to their shared credentials.
+      </div>
+
+      <div class="section-title">Part 1 — Vault &amp; Core Features</div>
+      <ul class="req-list">
+        <li>
+          <div class="li-wrap">
+            A master password locks and unlocks the entire vault
+            <div class="sub">
+              <span>The vault is locked by default when the app loads</span>
+              <span>How and when the session locks is your decision — think about what makes sense for real usage</span>
+            </div>
+          </div>
+        </li>
+        <li>All stored passwords must be encrypted — never readable as plain text anywhere in the system</li>
+        <li>
+          <div class="li-wrap">
+            Each saved credential contains: service or platform name, URL, username, password, and optional notes
+            <div class="sub">
+              <span>Credentials can be tagged or grouped by department, project, or category — how you structure this is your decision</span>
+            </div>
+          </div>
+        </li>
+        <li>
+          <div class="li-wrap">
+            A built-in password generator
+            <div class="sub">
+              <span>Configurable length</span>
+              <span>Toggle uppercase letters, numbers, and symbols on or off</span>
+              <span>One-click copy to clipboard</span>
+            </div>
+          </div>
+        </li>
+        <li>Every saved password displays a strength indicator — weak, fair, or strong</li>
+        <li>One-click copy for both username and password — without showing the password on screen if the user prefers</li>
+        <li>The app detects if the same password is reused across multiple entries and alerts the user</li>
+        <li>
+          <div class="li-wrap">
+            Data export — the user can download a backup of their vault
+          </div>
+        </li>
+      </ul>
+
+      <div class="section-title">Part 2 — Interface &amp; Experience</div>
+      <ul class="req-list">
+        <li>
+          <div class="li-wrap">
+            A multi-page application with clear structure
+            <div class="sub">
+              <span>Lock screen — this is the first thing the user sees every time</span>
+              <span>Vault overview — all credentials in a searchable, filterable list</span>
+              <span>Add / Edit credential form</span>
+              <span>Settings page — change master password, manage export, customize preferences</span>
+            </div>
+          </div>
+        </li>
+        <li>
+          <div class="li-wrap">
+            The vault list is fast, searchable, and easy to navigate — how you organize and structure it is your decision
+          </div>
+        </li>
+        <li>The add/edit form is clean and quick to use — every field should be obvious without any explanation</li>
+        <li>Smooth transitions between pages and states — the app should feel alive, not static</li>
+        <li>
+          <div class="li-wrap">
+            A proper first-time experience for a new user opening an empty vault
+            <div class="sub">
+              <span>Empty states should guide the user toward their first action — not show a blank screen</span>
+            </div>
+          </div>
+        </li>
+        <li><strong>One feature we didn't ask for</strong> — build something you think a company managing shared credentials genuinely needs. It will be evaluated.</li>
+      </ul>
+
+      <div class="ux-note">
+        <strong>⚠ UX Warning</strong>
+        A password manager that looks generic will feel untrustworthy — even if it works perfectly. The lock screen, the vault layout, the small interactions — all of it contributes to whether a team feels safe handing over their company credentials. This project will be judged as much on how it feels as on whether it works.
+      </div>
+
+      <div class="bonus-block">
+        <strong>🌟 Bonus — We Highly Rate This</strong>
+        The requirements above are the minimum. You are not just allowed to go beyond them — we actively want you to. Any feature, detail, flow, or idea you add on top of what's written here will be rated separately and weighted heavily in our evaluation. The candidates who impress us most are always the ones who saw a problem we didn't mention and solved it anyway. Show us how you think when nobody is telling you what to build.
+      </div>
+
+      <div class="open-block">
+        <strong>What We Leave Open to You</strong>
+        <p>What does the lock screen feel like for a company tool — professional, secure, fast? How do you organize credentials across departments or projects? How do you alert the team about reused passwords? What is your one extra feature, and why? These are your decisions. Make them deliberately.</p>
+      </div>
+
+      <div class="deliverables">
+        <strong>Submit</strong>
+        <ul>
+          <li>GitHub repo with a README that actually works — setup instructions must be clear</li>
+          <li>Working app — deployed link strongly preferred, or localhost with clear run instructions</li>
+          <li>A short screen recording showing the main flows: unlock, add entry, generate password, search</li>
+          <li>A product brief — 3 to 5 sentences max: who is this for, what problem does it solve, what would v2 look like</li>
+          <li>One paragraph: what would you add next if you had 3 more days?</li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+
+
+  <!-- TASK 03 -->
+  <div class="task">
+    <div class="task-header">
+      <span class="task-number">Task 03</span>
+      <span class="task-title">AI Meeting Notes</span>
+      <span class="difficulty diff-hard">Hard</span>
+    </div>
+    <div class="task-body">
+
+      <div class="context-label">Context</div>
+      <div class="context-text">
+        Every business runs on meetings — and every meeting produces decisions, tasks, and commitments that get lost immediately after everyone leaves the room. Build a tool for business teams: a Telegram bot that turns meeting recordings into structured, actionable notes, connected to a company dashboard where the whole team can track decisions and follow up on action items.
+      </div>
+
+      <div class="section-title">Part 1 — Telegram Bot</div>
+      <ul class="req-list">
+        <li>
+          <div class="li-wrap">
+            The bot accepts a voice message or audio file sent in Telegram
+            <div class="sub">
+              <span>It should handle recordings of different lengths — not just short clips</span>
+              <span>The bot sends a status update while processing — the user should never wonder if it's working</span>
+            </div>
+          </div>
+        </li>
+        <li>
+          <div class="li-wrap">
+            The audio is transcribed and analyzed by AI to produce structured output
+            <div class="sub">
+              <span>A short meeting summary — 3 to 5 sentences</span>
+              <span>Key decisions that were made</span>
+              <span>Action items — what needs to happen, and who is responsible (if names were mentioned)</span>
+              <span>Main topics or agenda points that were discussed</span>
+            </div>
+          </div>
+        </li>
+        <li>
+          <div class="li-wrap">
+            The bot returns results in a clean, readable format — not a wall of text
+            <div class="sub">
+              <span>Clearly organized sections with labels</span>
+              <span>Easy to read and forward to a colleague directly from Telegram</span>
+            </div>
+          </div>
+        </li>
+        <li>The user can also paste or send a text transcript directly — not everyone records audio</li>
+        <li>The user can ask the bot to adjust the output — "make it shorter", "more formal", "focus on action items only"</li>
+        <li>Every processed meeting is automatically saved and visible in the web dashboard</li>
+      </ul>
+
+      <div class="section-title">Part 2 — Web Dashboard</div>
+      <ul class="req-list">
+        <li>
+          <div class="li-wrap">
+            A multi-page application for managing all meeting notes
+            <div class="sub">
+              <span>Home — recent meetings and open action items at a glance</span>
+              <span>Meetings list — all past meetings, searchable and filterable</span>
+              <span>Meeting detail page — full notes, transcript, and action items for one meeting</span>
+              <span>Action Items page — all tasks across all meetings in one place with status tracking</span>
+            </div>
+          </div>
+        </li>
+        <li>
+          <div class="li-wrap">
+            The Meetings list is functional and fast
+            <div class="sub">
+              <span>Keyword search across meeting content</span>
+              <span>Filter by date range</span>
+              <span>Each meeting card shows: date, summary preview, and number of open action items</span>
+            </div>
+          </div>
+        </li>
+        <li>
+          <div class="li-wrap">
+            The Meeting detail page is well-organized and editable
+            <div class="sub">
+              <span>Summary, decisions, action items, and topics in clearly separated sections</span>
+              <span>Option to view or collapse the full transcript</span>
+              <span>Any section can be edited manually if the AI output is wrong — how you design that editing experience is your call</span>
+            </div>
+          </div>
+        </li>
+        <li>
+          <div class="li-wrap">
+            The Action Items page keeps users on top of what needs to happen
+            <div class="sub">
+              <span>Items can be tracked by status — how you define and display those statuses is your decision</span>
+              <span>If the same person is mentioned across multiple meetings, their tasks should be visible together</span>
+            </div>
+          </div>
+        </li>
+        <li>All data from the bot syncs to the dashboard automatically</li>
+        <li>
+          <div class="li-wrap">
+            A proper first-time experience — a new user with no meetings yet should know exactly what to do next
+          </div>
+        </li>
+        <li><strong>One feature we didn't ask for</strong> — build something you think makes this genuinely useful for a business team. It will be evaluated.</li>
+      </ul>
+
+      <div class="ux-note">
+        <strong>⚠ UX Warning</strong>
+        Meeting notes are used by professionals every day. The dashboard should feel like a tool a team opens at the start of their workday — not a prototype. Clear hierarchy, clean layout, and a consistent visual language are not optional here. We will evaluate the interface as seriously as we evaluate the quality of the AI output.
+      </div>
+
+      <div class="bonus-block">
+        <strong>🌟 Bonus — We Highly Rate This</strong>
+        The requirements above are the minimum. You are not just allowed to go beyond them — we actively want you to. Any feature, detail, flow, or idea you add on top of what's written here will be rated separately and weighted heavily in our evaluation. The candidates who impress us most are always the ones who saw a problem we didn't mention and solved it anyway. Show us how you think when nobody is telling you what to build.
+      </div>
+
+      <div class="open-block">
+        <strong>What We Leave Open to You</strong>
+        <p>How do you handle very long recordings from full team meetings? When the AI gets something wrong — what does correcting it feel like for a busy professional? How does a new team with zero meetings get started? Can meetings be organized by department, project, or client? What is your one extra feature, and why did you choose it? These are your decisions. Make them deliberately.</p>
+      </div>
+
+      <div class="deliverables">
+        <strong>Submit</strong>
+        <ul>
+          <li>GitHub repo with a README that actually works — setup instructions must be clear</li>
+          <li>Working Telegram bot — share the username so we can test it live</li>
+          <li>Web dashboard — deployed link preferred, or localhost with clear run instructions</li>
+          <li>A real sample output — show us actual notes generated from a real or realistic meeting recording</li>
+          <li>A short screen recording showing the full flow: audio → bot output → dashboard</li>
+          <li>A product brief — 3 to 5 sentences max: who is this for, what problem does it solve, what would v2 look like</li>
+          <li>One paragraph: what would you add next if you had 3 more days?</li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+
+
+  <div class="doc-footer">
+    <span>data365 agency · Tashkent, Uzbekistan</span>
+    <span>Questions? Contact your HR coordinator.</span>
+  </div>
+
+</div>
+
+
+</body></html>
