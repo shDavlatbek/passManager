@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
+import Link from "next/link";
 import { useVaultStore } from "@/lib/vault-store";
 import { analyzeStrength } from "@/lib/strength";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -181,6 +182,12 @@ export default function LockScreen() {
           <span>AES-256-GCM</span>
           <span>·</span>
           <span>PBKDF2 / 600k</span>
+        </div>
+
+        <div className="mt-8 text-center text-[11px] text-[var(--color-muted)] space-x-4">
+          <Link href="/privacy-policy" className="hover:text-[var(--color-text)] transition-colors">Privacy</Link>
+          <span>·</span>
+          <Link href="/terms" className="hover:text-[var(--color-text)] transition-colors">Terms</Link>
         </div>
       </div>
     </main>
